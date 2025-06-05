@@ -1,0 +1,137 @@
+
+import openpyxl
+import numpy as np
+import pandas as pd
+import sklearn as skl
+import time
+
+from sklearn import model_selection
+from sklearn import neighbors
+from sklearn import metrics
+
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+import seaborn as sns
+
+from google.colab import drive
+drive.mount('')
+path=''
+# this code was written in colab as my pc isn't very good, so the idea is to import an excel file with intended metrics.
+# here I just used 2 measures, but I want to add an PCR to analyze which measures better explain variability in the data, so that the code can use less metrics to guess the ID.
+
+data = pd.read_excel(path, engine='openpyxl')
+
+sns.lmplot(x='pec', y='pedic', data= data,
+           fit_reg=False,
+           hue='Unnamed: 0')
+
+plt.title('Medidas de pecíolo vs pedicelo')
+#This was jsut to better visualize the distribution of data. I don't think this is important to the final result
+
+X = data[['pec','pedic']].values
+
+y = data[['Unnamed: 0']].values
+y = np.ravel( y )
+
+cv = skl.model_selection.StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=13)
+
+train_index, test_index = list( cv.split(X, y))[0]
+
+X_train, X_test = X[train_index, :], X[test_index, :];
+Y_train, Y_test = y[train_index], y[test_index];
+
+print('Qtd. dados de treinamento: %d (%1.2f%%)' %(X_train.shape[0], (X_train.shape[0]/X.shape[0])*100) )
+print('Qtd. de dados de teste: %d (%1.2f%%)' %(X_test.shape[0], (X_test.shape[0]/X.shape[0])*100) )
+
+print("\nQtd. de dados de cada classe (treinamento)")
+cTrain, counts_cTrain = np.unique(np.sort(Y_train), return_counts=True)
+for i in range( len(cTrain) ):
+    print('\tClasse %s: %d (%1.2f%%)' %( cTrain[i],counts_cTrain[i],(counts_cTrain[i]/len(Y_train))*100 ) )
+
+print("\nQtd. de dados de cada classe (teste)")
+cTest, counts_cTest = np.unique(np.sort(Y_test), return_counts=True)
+for i in range( len(cTrain) ):
+    print('\tClasse %s: %d (%1.2f%%)' %( cTest[i],counts_cTest[i],(counts_cTest[i]/len(Y_test))*100 ) )
+#training of the model
+
+scaler = skl.preprocessing.StandardScaler().fit(X_train)
+X_train = scaler.transform(X_train)
+
+scaler = skl.preprocessing.StandardScaler().fit(X_test)
+X_test = scaler.transform(X_test)
+
+classifier = skl.neighbors.KNeighborsClassifier(n_neighbors=1)
+
+classifier.fit(X_train, Y_train)
+
+Y_pred = classifier.predict(X_test)
+
+print('\nPredição obtida para as 20 primeiras amostras de teste:\n', Y_pred[0:20])
+#scaling
+
+def plota_superficieDecisao(classifier, X, Y, ax, title = ""):
+    h = .02
+
+    x_min, x_max = X[:, 0].min() - 0.3, X[:, 0].max() + 0.3
+    y_min, y_max = X[:, 1].min() - 0.3, X[:, 1].max() + 0.3
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h),
+                         np.arange(y_min, y_max, h))
+
+    Z = classifier.predict(np.c_[xx.ravel(), yy.ravel()])
+
+    Z2 = np.unique(Z, return_inverse=True)[1]
+
+    Z2 = Z2.reshape(xx.shape)
+    ax.contourf(xx, yy, Z2, cmap=plt.cm.Paired, alpha=.4)
+
+    Y2 = np.unique(Y, return_inverse=True)[1]
+
+    ax.scatter(X[:, 0], X[:, 1], c=Y2, edgecolor='k', s=100)
+
+    ax.set_xlim(xx.min(), xx.max())
+    ax.set_ylim(yy.min(), yy.max())
+    ax.set_title(title, fontsize='large')
+
+
+fig, ax = plt.subplots(figsize=(8, 8))
+
+plota_superficieDecisao(classifier, X_test, Y_test, ax, title = "Superficie de decisao do KNN")
+#Knn decision plot. I believe the addition of more algorithms rather than just KNN is the way to go
+
+KNNClassifier = skl.neighbors.KNeighborsClassifier()
+
+param_grid = {'n_neighbors': np.arange(1,16,2)}
+
+cvGrid = skl.model_selection.StratifiedShuffleSplit(n_splits=1, test_size=0.3, random_state=13)
+
+classifier = skl.model_selection.GridSearchCV(KNNClassifier, cv=cvGrid, param_grid=param_grid, scoring = 'f1_macro')
+
+classifier.fit(X_train, Y_train)
+
+classifier_best = classifier.best_estimator_
+
+print('\nQtd. de vizinhos escolhida na busca em grade')
+print('Parâmetro: ', classifier.best_params_['n_neighbors'], '-- Score: ', "{0:.3f}".format(classifier.best_score_))
+
+print("\nMacro F-medida obtida para cada parametro testado na busca em grade:")
+print()
+means = classifier.cv_results_['mean_test_score']
+for mean, params in zip(means, classifier.cv_results_['params']):
+    print("n_neighbors = %d -- Macro F-medida = %0.3f" % (params['n_neighbors'],mean))
+	
+acuracia = metrics.accuracy_score(Y_test, Y_pred)
+print(acuracia)
+
+def input_data():
+  pec = float(input("Digite o valor de pec: "))
+  pedic = float(input("Digite o valor de pedic: "))
+  new_point = [[pec, pedic]]
+  return new_point
+#accepting a new user input and comparing it to the data
+
+new_point = input_data()
+new_point_scaled = scaler.transform(new_point)
+prediction = classifier.predict(new_point_scaled)
+print()
+print('Classe Predita:', prediction[0])
+#the prediction
